@@ -104,7 +104,7 @@ test = "pytest --cov=src --cov=tests --cov-report=term-missing:skip-covered test
 
 [tool.pdm.version]
 source = "file"
-path = "src/kaxanuk/data_curator/data_providers/yahoo_finance/__init__.py"
+path = "src/kaxanuk/data_curator_extensions/yahoo_finance/__init__.py"
 # @todo: change to read from scm once we're using Git tags
 # source = "scm"
 # When building from a source tree where SCM is not available, you can use the env var PDM_BUILD_SCM_VERSION to pretend the version is set.
