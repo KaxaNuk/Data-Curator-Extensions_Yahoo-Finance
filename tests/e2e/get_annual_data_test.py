@@ -58,3 +58,7 @@ def test_get_market_data(yahoo_finance_instance):
     )
 
     assert isinstance(market_data, MarketData)
+
+# @todo: test market data failure from missing ticker
+
+# @todo: test market data failure from missing data for selected period
