@@ -188,7 +188,15 @@ ignore = [
 "unittest.mock".msg = "use pytest builtin monkeypatch fixture instead"
 
 [tool.ruff.lint.per-file-ignores]
-# ignores go here
+"tests/**" = [
+    "ANN",      # Tests don't need to be annotated
+    "DTZ011",   # Tests don't need to follow strict datetime rules
+    "D",        # Tests don't need to follow strict documentation requirements
+    "PLR2004",  # No problem if magic values are usen in tests
+    "RET",      # No need for return strictness in tests
+    "S101",     # Permit use of pytest assert
+    "SLF",      # Tests need private member access
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"

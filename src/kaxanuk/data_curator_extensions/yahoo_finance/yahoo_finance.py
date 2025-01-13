@@ -1,6 +1,5 @@
 import datetime
 import types
-import typing
 
 import pandas
 import yfinance
@@ -30,8 +29,8 @@ from kaxanuk.data_curator.services import entity_helper
 class YahooFinance(DataProviderInterface):
 
     _config_to_yf_periods = types.MappingProxyType({
-        'annual': '1y',
-        'quarterly': '3mo',
+        'annual': 'yearly',
+        'quarterly': 'quarterly',
     })
 
     _fields_market_data_daily_rows = types.MappingProxyType({
@@ -46,7 +45,8 @@ class YahooFinance(DataProviderInterface):
     })
 
     def __init__(self):
-        self.stock_data = None
+        self.stock_general_data = None
+        self.stock_market_data = None
 
     def get_dividend_data(
         self,
@@ -81,14 +81,16 @@ class YahooFinance(DataProviderInterface):
         end_date: datetime.date,
     ) -> MarketData:
         """
-        Get the market data from the FMP web service wrapped in a MarketData entity.
+        Get the market data from the web service wrapped in a MarketData entity.
 
         Parameters
         ----------
         ticker
             the stock's ticker
         start_date
+            the start date for the data
         end_date
+            the end date for the data
 
         Returns
         -------
@@ -97,16 +99,18 @@ class YahooFinance(DataProviderInterface):
         Raises
         ------
         ConnectionError
+        EntityProcessingError
+        TickerNotFoundError
         """
         if (
-            self.stock_data is None
-            or ticker not in self.stock_data
+            self.stock_market_data is None
+            or ticker not in self.stock_market_data
         ):
             raise TickerNotFoundError(f"No market data for ticker {ticker}")
 
         return self._create_market_data_from_response_dataframe(
             ticker,
-            self.stock_data[ticker]
+            self.stock_market_data[ticker]
         )
 
     def get_split_data(
@@ -126,9 +130,18 @@ class YahooFinance(DataProviderInterface):
         *,
         configuration: Configuration,
     ) -> None:
-        self.stock_data = yfinance.download(
-            configuration.tickers,
-            period=self._config_to_yf_periods[configuration.period],
+        """
+        Download the ticker data required by the other interface implementation methods.
+
+        Parameters
+        ----------
+        configuration
+            The Configuration entity with the required data parameters
+        """
+        self.stock_general_data = yfinance.Tickers(
+            " ".join(configuration.tickers)
+        )
+        self.stock_market_data = self.stock_general_data.history(
             start=configuration.start_date.strftime("%Y-%m-%d"),
             end=configuration.end_date.strftime("%Y-%m-%d"),
             actions=True,
@@ -173,11 +186,13 @@ class YahooFinance(DataProviderInterface):
         """
         market_data_rows = {}
         try:
-            if response_dataframe is None:
+            if (
+                response_dataframe is None
+                or response_dataframe.empty
+            ):
                 raise MarketDataEmptyError("No data returned by market data endpoint")
 
             timestamps = response_dataframe.index.to_series()
-            # dates = timestamps.dt.date
 
             min_date = None
             max_date = None
@@ -187,9 +202,6 @@ class YahooFinance(DataProviderInterface):
                 price_date_string = price_date.isoformat()
                 try:
                     date_indexed_row = response_dataframe.loc[timestamp]
-                    # date_row = date_indexed_row.reset_index()
-                    # date_row.index.astype(str)
-                    # stock_row = date_row.to_dict()
                     stock_row = (
                         {cls._fields_market_data_daily_rows['date']: price_date_string}
                         | date_indexed_row.to_dict()
@@ -234,25 +246,3 @@ class YahooFinance(DataProviderInterface):
             raise EntityProcessingError("Market data processing error") from error
 
         return market_data
-
-    @staticmethod
-    def _cast_dict_keys_to_string(dictionary: dict) -> dict:
-        """
-        Cast the dictionary keys to string.
-
-        This is just to help typecheckers understand that the keys of `dictionary` are strings.
-
-        Parameters
-        ----------
-        dictionary
-            The dict to typecast
-
-        Returns
-        -------
-        dict
-            The same dict after typecasting the keys to string
-        """
-        return typing.cast(
-            dictionary,
-            dict[str, typing.Any]
-        )
