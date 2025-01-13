@@ -3,7 +3,8 @@ import pytest
 
 from kaxanuk.data_curator.entities import (
     Configuration,
-    MarketData
+    DividendData,
+    MarketData,
 )
 from kaxanuk.data_curator.exceptions import (
     EntityProcessingError,
@@ -159,3 +160,20 @@ def test_get_valid_market_data(
     )
 
     assert isinstance(market_data, MarketData)
+
+
+@pytest.mark.parametrize(
+    'ticker',
+    VALID_TICKERS_TO_TEST
+)
+def test_get_valid_dividend_data(
+    yahoo_finance_valid_tickers_instance,
+    ticker
+):
+    dividend_data = yahoo_finance_valid_tickers_instance.get_dividend_data(
+        ticker=ticker,
+        start_date=YEAR_AGO_FROM_YESTERDAY,
+        end_date=YESTERDAY,
+    )
+
+    assert isinstance(dividend_data, DividendData)
