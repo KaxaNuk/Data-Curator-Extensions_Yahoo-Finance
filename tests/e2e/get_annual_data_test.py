@@ -35,6 +35,7 @@ INVALID_TICKERS_TO_TEST = (
 VALID_TICKERS_TO_TEST = (
     'AAPL',
     'F',
+    'JPM',
     'MSFT',
     'TSLA',
 )
