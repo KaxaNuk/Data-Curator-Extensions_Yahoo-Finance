@@ -1,5 +1,6 @@
 import datetime
 import decimal
+import enum
 import logging
 import types
 
@@ -17,13 +18,15 @@ from kaxanuk.data_curator.entities import (
     Ticker,
 )
 from kaxanuk.data_curator.exceptions import (
+    DividendDataEmptyError,
+    DividendDataRowError,
     EntityFieldTypeError,
     EntityProcessingError,
     EntityTypeError,
     EntityValueError,
     MarketDataEmptyError,
     MarketDataRowError,
-    TickerNotFoundError, DividendDataEmptyError, DividendDataRowError,
+    TickerNotFoundError,
 )
 from kaxanuk.data_curator.data_providers.data_provider_interface import DataProviderInterface
 from kaxanuk.data_curator.services import entity_helper
@@ -47,6 +50,9 @@ class YahooFinance(DataProviderInterface):
         'vwap': None
     })
 
+    class MarketDataResponseHeaders(enum.StrEnum):
+        DIVIDENDS = 'Dividends'
+
     def __init__(self):
         self.stock_general_data = None
         self.stock_market_data = None
@@ -58,16 +64,50 @@ class YahooFinance(DataProviderInterface):
         start_date: datetime.date,
         end_date: datetime.date,
     ) -> DividendData:
-        if (
-            self.stock_market_data is None
-            or ticker not in self.stock_market_data
-        ):
-            raise DividendDataEmptyError("No dividend data returned")   # @todo: what to throw here?
+        """
+        Get the dividend data from the web service response, wrapped in a DividendData entity.
 
-        return self._create_dividend_data_from_response_dataframe(
-            ticker,
-            self.stock_market_data[ticker]
-        )
+        Parameters
+        ----------
+        ticker
+            the stock's ticker
+        start_date
+            the start date for the data
+        end_date
+            the end date for the data
+
+        Returns
+        -------
+        DividendData
+
+        """
+        try:
+            if (
+                self.stock_market_data is None
+                or ticker not in self.stock_market_data
+            ):
+                raise DividendDataEmptyError
+
+            dividend_data = self._create_dividend_data_from_response_dataframe(
+                ticker,
+                self.stock_market_data[ticker]
+            )
+        except DividendDataEmptyError:
+            msg = f"{ticker} has no dividend data obtained for the selected period, omitting its dividend data"
+            logging.getLogger(__name__).warning(msg)
+            dividend_data = DividendData(
+                ticker=Ticker(ticker),
+                rows={}
+            )
+        except DividendDataRowError as error:
+            msg = f"{ticker} dividend data error: {error}"
+            logging.getLogger(__name__).error(msg)
+            dividend_data = DividendData(
+                ticker=Ticker(ticker),
+                rows={}
+            )
+
+        return dividend_data
 
     def get_fundamental_data(
         self,
@@ -107,7 +147,6 @@ class YahooFinance(DataProviderInterface):
 
         Raises
         ------
-        ConnectionError
         EntityProcessingError
         TickerNotFoundError
         """
@@ -191,57 +230,45 @@ class YahooFinance(DataProviderInterface):
 
         Raises
         ------
-        EntityProcessingError
+        DividendDataEmptyError
+        DividendDataRowError
         """
-        try:
-            if 'Dividends' not in response_dataframe:
-                raise DividendDataEmptyError
+        if cls.MarketDataResponseHeaders.DIVIDENDS not in response_dataframe:
+            raise DividendDataEmptyError
 
+        iteration_date = None
+        try:
             dividends = response_dataframe.Dividends.loc[lambda x: x > 0]
             dividend_rows = {}
 
-            iteration_date = None
-            try:
-                for (timezone_date, dividend) in dividends.items():
-                    date = timezone_date.date()
-                    iteration_date = date.isoformat()
-                    dividend_rows[iteration_date] = DividendDataRow(
-                        declaration_date=None,
-                        ex_dividend_date=date,
-                        record_date=None,
-                        payment_date=None,
-                        # @todo: check which one this is, as there's only a single value:
-                        dividend=decimal.Decimal(
-                            str(dividend)
-                        ),
-                        adjusted_dividend=decimal.Decimal(
-                            str(dividend)
-                        ),
-                    )
-            except (
-                EntityFieldTypeError,
-                EntityTypeError,
-                EntityValueError,
-            ) as error:
-                msg = f"date: {iteration_date}"
-                raise DividendDataRowError(msg) from error
-
-            dividend_data = DividendData(
-                ticker=Ticker(ticker),
-                rows=dividend_rows
-            )
+            for (timezone_date, dividend) in dividends.items():
+                date = timezone_date.date()
+                iteration_date = date.isoformat()
+                dividend_rows[iteration_date] = DividendDataRow(
+                    declaration_date=None,
+                    ex_dividend_date=date,
+                    record_date=None,
+                    payment_date=None,
+                    dividend=decimal.Decimal(
+                        str(dividend)
+                    ),
+                    # @todo: the following field is not present in the data source, need to make the field optional:
+                    adjusted_dividend=decimal.Decimal(
+                        str(dividend)
+                    ),
+                )
         except (
-            DividendDataEmptyError,
-            DividendDataRowError
-        ):
-            msg = f"{ticker} has no dividend data obtained for the selected period, omitting its dividend data"
-            logging.getLogger(__name__).warning(msg)
-            dividend_data = DividendData(
-                ticker=Ticker(ticker),
-                rows={}
-            )
+            EntityFieldTypeError,
+            EntityTypeError,
+            EntityValueError,
+        ) as error:
+            msg = f"date: {iteration_date}"
+            raise DividendDataRowError(msg) from error
 
-        return dividend_data
+        return DividendData(
+            ticker=Ticker(ticker),
+            rows=dividend_rows
+        )
 
     @classmethod
     def _create_market_data_from_response_dataframe(
@@ -285,12 +312,11 @@ class YahooFinance(DataProviderInterface):
                 price_date_string = price_date.isoformat()
                 try:
                     date_indexed_row = response_dataframe.loc[timestamp]
-                    stock_row = (
-                        {cls._fields_market_data_daily_rows['date']: price_date_string}
-                        | date_indexed_row.to_dict()
-                    )
+                    date_key = cls._fields_market_data_daily_rows['date']
+                    entity_fields_row = date_indexed_row.to_dict()
+                    entity_fields_row[date_key] = price_date_string
                     attributes = entity_helper.fill_fields(
-                        stock_row,
+                        entity_fields_row,
                         dict(cls._fields_market_data_daily_rows),
                         MarketDataDailyRow
                     )
