@@ -1,6 +1,6 @@
 import datetime
 import decimal
-import enum
+import fractions
 import logging
 import types
 
@@ -15,6 +15,7 @@ from kaxanuk.data_curator.entities import (
     MarketData,
     MarketDataDailyRow,
     SplitData,
+    SplitDataRow,
     Ticker,
 )
 from kaxanuk.data_curator.exceptions import (
@@ -26,6 +27,8 @@ from kaxanuk.data_curator.exceptions import (
     EntityValueError,
     MarketDataEmptyError,
     MarketDataRowError,
+    SplitDataEmptyError,
+    SplitDataRowError,
     TickerNotFoundError,
 )
 from kaxanuk.data_curator.data_providers.data_provider_interface import DataProviderInterface
@@ -39,7 +42,7 @@ class YahooFinance(DataProviderInterface):
         'quarterly': 'quarterly',
     })
 
-    _fields_market_data_daily_rows = types.MappingProxyType({
+    _field_correspondences_market_data_daily_rows = types.MappingProxyType({
         'date': 'Date',
         'open': 'Open',
         'high': 'High',
@@ -49,9 +52,6 @@ class YahooFinance(DataProviderInterface):
         'volume': 'Volume',
         'vwap': None
     })
-
-    class MarketDataResponseHeaders(enum.StrEnum):
-        DIVIDENDS = 'Dividends'
 
     def __init__(self):
         self.stock_general_data = None
@@ -79,18 +79,23 @@ class YahooFinance(DataProviderInterface):
         Returns
         -------
         DividendData
-
         """
         try:
             if (
-                self.stock_market_data is None
-                or ticker not in self.stock_market_data
+                self.stock_general_data is None
+                or ticker not in self.stock_general_data.tickers
+                or not hasattr(
+                    self.stock_general_data.tickers[ticker],
+                    'dividends'
+                )
             ):
                 raise DividendDataEmptyError
 
-            dividend_data = self._create_dividend_data_from_response_dataframe(
+            dividend_data = self._create_dividend_data_from_response_dividends_series(
                 ticker,
-                self.stock_market_data[ticker]
+                self.stock_general_data.tickers[ticker].dividends,
+                start_date=start_date,
+                end_date=end_date,
             )
         except DividendDataEmptyError:
             msg = f"{ticker} has no dividend data obtained for the selected period, omitting its dividend data"
@@ -168,10 +173,55 @@ class YahooFinance(DataProviderInterface):
         start_date: datetime.date,
         end_date: datetime.date,
     ) -> SplitData:
-        return SplitData(
-            ticker=Ticker(ticker),
-            rows={}
-        )
+        """
+        Get the split data from the web service response, wrapped in a SplitData entity.
+
+        Parameters
+        ----------
+        ticker
+            the stock's ticker
+        start_date
+            the start date for the data
+        end_date
+            the end date for the data
+
+        Returns
+        -------
+        SplitData
+        """
+        try:
+            if (
+                self.stock_general_data is None
+                or ticker not in self.stock_general_data.tickers
+                or not hasattr(
+                    self.stock_general_data.tickers[ticker],
+                    'splits'
+                )
+            ):
+                raise SplitDataEmptyError
+
+            split_data = self._create_split_data_from_response_splits_series(
+                ticker,
+                self.stock_general_data.tickers[ticker].splits,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except SplitDataEmptyError:
+            msg = f"{ticker} has no split data obtained for the selected period, omitting its split data"
+            logging.getLogger(__name__).warning(msg)
+            split_data = SplitData(
+                ticker=Ticker(ticker),
+                rows={}
+            )
+        except SplitDataRowError as error:
+            msg = f"{ticker} split data error: {error}"
+            logging.getLogger(__name__).error(msg)
+            split_data = SplitData(
+                ticker=Ticker(ticker),
+                rows={}
+            )
+
+        return split_data
 
     def init_config(
         self,
@@ -190,8 +240,8 @@ class YahooFinance(DataProviderInterface):
             " ".join(configuration.tickers)
         )
         self.stock_market_data = self.stock_general_data.history(
-            start=configuration.start_date.strftime("%Y-%m-%d"),
-            end=configuration.end_date.strftime("%Y-%m-%d"),
+            start=configuration.start_date.isoformat(),
+            end=configuration.end_date.isoformat(),
             actions=True,
             group_by='ticker',
         )
@@ -209,10 +259,12 @@ class YahooFinance(DataProviderInterface):
         return True
 
     @classmethod
-    def _create_dividend_data_from_response_dataframe(
+    def _create_dividend_data_from_response_dividends_series(
         cls,
         ticker: str,
-        response_dataframe: pandas.DataFrame
+        dividends_series: pandas.DataFrame,
+        start_date: datetime.date,
+        end_date: datetime.date,
     ) -> DividendData:
         """
         Populate a DividendData entity from the web service raw data.
@@ -221,8 +273,12 @@ class YahooFinance(DataProviderInterface):
         ----------
         ticker
             The ticker symbol
-        response_dataframe
-            The ticker's dataframe
+        dividends_series
+            The ticker's dividends as a Pandas Series
+        start_date
+            The start date for the data we're interested in
+        end_date
+            The end date for the data we're interested in
 
         Returns
         -------
@@ -233,14 +289,18 @@ class YahooFinance(DataProviderInterface):
         DividendDataEmptyError
         DividendDataRowError
         """
-        if cls.MarketDataResponseHeaders.DIVIDENDS not in response_dataframe:
+        if dividends_series.empty:
             raise DividendDataEmptyError
 
         iteration_date = None
         try:
-            dividends = response_dataframe.Dividends.loc[lambda x: x > 0]
+            # yfinance is assigning made-up date timezones, so we can't compare the date objects directly
+            date_range = slice(
+                start_date.isoformat(),
+                end_date.isoformat()
+            )
+            dividends = dividends_series[date_range]
             dividend_rows = {}
-
             for (timezone_date, dividend) in dividends.items():
                 date = timezone_date.date()
                 iteration_date = date.isoformat()
@@ -312,12 +372,12 @@ class YahooFinance(DataProviderInterface):
                 price_date_string = price_date.isoformat()
                 try:
                     date_indexed_row = response_dataframe.loc[timestamp]
-                    date_key = cls._fields_market_data_daily_rows['date']
+                    date_key = cls._field_correspondences_market_data_daily_rows['date']
                     entity_fields_row = date_indexed_row.to_dict()
                     entity_fields_row[date_key] = price_date_string
                     attributes = entity_helper.fill_fields(
                         entity_fields_row,
-                        dict(cls._fields_market_data_daily_rows),
+                        dict(cls._field_correspondences_market_data_daily_rows),
                         MarketDataDailyRow
                     )
                     market_data_rows[price_date_string] = MarketDataDailyRow(
@@ -355,3 +415,69 @@ class YahooFinance(DataProviderInterface):
             raise EntityProcessingError("Market data processing error") from error
 
         return market_data
+
+    @classmethod
+    def _create_split_data_from_response_splits_series(
+        cls,
+        ticker: str,
+        splits_series: pandas.Series,
+        start_date: datetime.date,
+        end_date: datetime.date,
+    ) -> SplitData:
+        """
+        Populate a SplitData entity from the web service raw data.
+
+        Parameters
+        ----------
+        ticker
+            The ticker symbol
+        splits_series
+            The ticker's splits as a Pandas Series
+        start_date
+            The start date for the data we're interested in
+        end_date
+            The end date for the data we're interested in
+
+        Returns
+        -------
+        SplitData
+
+        Raises
+        ------
+        SplitDataEmptyError
+        SplitDataRowError
+        """
+        if splits_series.empty:
+            raise SplitDataEmptyError
+
+        iteration_date = None
+        try:
+            # yfinance is assigning made-up date timezones, so we can't compare the date objects directly
+            date_range = slice(
+                start_date.isoformat(),
+                end_date.isoformat()
+            )
+            splits = splits_series[date_range]
+            split_rows = {}
+            for (timezone_date, split) in splits.items():
+                date = timezone_date.date()
+                iteration_date = date.isoformat()
+                split_fraction = fractions.Fraction(split).limit_denominator()
+
+                split_rows[iteration_date] = SplitDataRow(
+                    split_date=date,
+                    numerator=float(split_fraction.numerator),
+                    denominator=float(split_fraction.denominator),
+                )
+        except (
+            EntityFieldTypeError,
+            EntityTypeError,
+            EntityValueError,
+        ) as error:
+            msg = f"date: {iteration_date}"
+            raise SplitDataRowError(msg) from error
+
+        return SplitData(
+            ticker=Ticker(ticker),
+            rows=split_rows
+        )

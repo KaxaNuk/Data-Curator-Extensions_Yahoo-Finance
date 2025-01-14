@@ -4,7 +4,7 @@ import pytest
 from kaxanuk.data_curator.entities import (
     Configuration,
     DividendData,
-    MarketData,
+    MarketData, SplitData,
 )
 from kaxanuk.data_curator.exceptions import (
     EntityProcessingError,
@@ -36,9 +36,10 @@ VALID_TICKERS_TO_TEST = (
     'AAPL',
     'F',
     'MSFT',
+    'TSLA',
 )
 YESTERDAY = datetime.date.today() - datetime.timedelta(days=1)
-YEAR_AGO_FROM_YESTERDAY = YESTERDAY - datetime.timedelta(days=365)
+START_DATE = datetime.date.fromisoformat('2020-01-01')
 
 
 @pytest.fixture(scope="module")
@@ -46,7 +47,7 @@ def yahoo_finance_inexistent_tickers_instance():
     yahoo_finance = YahooFinance()
     yahoo_finance.init_config(
         configuration=Configuration(
-            start_date=YEAR_AGO_FROM_YESTERDAY,
+            start_date=START_DATE,
             end_date=YESTERDAY,
             period=PERIOD_TO_TEST,
             tickers=INEXISTENT_TICKERS_TO_TEST,
@@ -62,7 +63,7 @@ def yahoo_finance_invalid_tickers_instance():
     yahoo_finance = YahooFinance()
     yahoo_finance.init_config(
         configuration=Configuration(
-            start_date=YEAR_AGO_FROM_YESTERDAY,
+            start_date=START_DATE,
             end_date=YESTERDAY,
             period=PERIOD_TO_TEST,
             tickers=INVALID_TICKERS_TO_TEST,
@@ -78,7 +79,7 @@ def yahoo_finance_valid_tickers_instance():
     yahoo_finance = YahooFinance()
     yahoo_finance.init_config(
         configuration=Configuration(
-            start_date=YEAR_AGO_FROM_YESTERDAY,
+            start_date=START_DATE,
             end_date=YESTERDAY,
             period=PERIOD_TO_TEST,
             tickers=VALID_TICKERS_TO_TEST,
@@ -124,7 +125,7 @@ def test_get_inexistent_market_data(
     with pytest.raises(TickerNotFoundError):
         yahoo_finance_inexistent_tickers_instance.get_market_data(
             ticker=ticker,
-            start_date=YEAR_AGO_FROM_YESTERDAY,
+            start_date=START_DATE,
             end_date=YESTERDAY,
         )
 
@@ -140,7 +141,7 @@ def test_get_invalid_market_data(
     with pytest.raises(EntityProcessingError):
         yahoo_finance_invalid_tickers_instance.get_market_data(
             ticker=ticker,
-            start_date=YEAR_AGO_FROM_YESTERDAY,
+            start_date=START_DATE,
             end_date=YESTERDAY,
         )
 
@@ -155,7 +156,7 @@ def test_get_valid_market_data(
 ):
     market_data = yahoo_finance_valid_tickers_instance.get_market_data(
         ticker=ticker,
-        start_date=YEAR_AGO_FROM_YESTERDAY,
+        start_date=START_DATE,
         end_date=YESTERDAY,
     )
 
@@ -172,8 +173,25 @@ def test_get_valid_dividend_data(
 ):
     dividend_data = yahoo_finance_valid_tickers_instance.get_dividend_data(
         ticker=ticker,
-        start_date=YEAR_AGO_FROM_YESTERDAY,
+        start_date=START_DATE,
         end_date=YESTERDAY,
     )
 
     assert isinstance(dividend_data, DividendData)
+
+
+@pytest.mark.parametrize(
+    'ticker',
+    VALID_TICKERS_TO_TEST
+)
+def test_get_valid_split_data(
+    yahoo_finance_valid_tickers_instance,
+    ticker
+):
+    split_data = yahoo_finance_valid_tickers_instance.get_split_data(
+        ticker=ticker,
+        start_date=START_DATE,
+        end_date=YESTERDAY,
+    )
+
+    assert isinstance(split_data, SplitData)
