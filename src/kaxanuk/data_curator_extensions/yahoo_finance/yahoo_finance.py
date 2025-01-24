@@ -42,6 +42,10 @@ class YahooFinance(DataProviderInterface):
         'quarterly': 'quarterly',
     })
 
+    _field_correspondences_fundamental_income_statement = types.MappingProxyType({
+
+    })
+
     _field_correspondences_market_data_daily_rows = types.MappingProxyType({
         'date': 'Date',
         'open': 'Open',
@@ -50,7 +54,7 @@ class YahooFinance(DataProviderInterface):
         'close': 'Close',
         'adjusted_close': None,
         'volume': 'Volume',
-        'vwap': None
+        'vwap': None,
     })
 
     def __init__(self):
@@ -362,7 +366,11 @@ class YahooFinance(DataProviderInterface):
             ):
                 raise MarketDataEmptyError("No data returned by market data endpoint")
 
-            timestamps = response_dataframe.index.to_series()
+            non_empty_rows_dataframe = response_dataframe.dropna(how='all')
+            if non_empty_rows_dataframe.empty:
+                raise MarketDataEmptyError("No non-empty data returned by market data endpoint")
+
+            timestamps = non_empty_rows_dataframe.index.to_series()
 
             min_date = None
             max_date = None
@@ -371,7 +379,7 @@ class YahooFinance(DataProviderInterface):
                 price_date = timestamp.date()
                 price_date_string = price_date.isoformat()
                 try:
-                    date_indexed_row = response_dataframe.loc[timestamp]
+                    date_indexed_row = non_empty_rows_dataframe.loc[timestamp]
                     date_key = cls._field_correspondences_market_data_daily_rows['date']
                     entity_fields_row = date_indexed_row.to_dict()
                     entity_fields_row[date_key] = price_date_string

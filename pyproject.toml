@@ -4,7 +4,7 @@ build-backend = "pdm.backend"
 
 
 [project]
-name = "kaxanuk-data_curator-data_providers-yahoo_finance"
+name = "kaxanuk-data_curator_extensions-yahoo_finance"
 description = "Yahoo Finance data provider for the KaxaNuk Data Curator component library"
 
 authors = [
