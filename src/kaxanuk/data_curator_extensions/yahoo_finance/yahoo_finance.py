@@ -252,15 +252,15 @@ class YahooFinance(DataProviderInterface):
 
     def validate_api_key(
         self,
-    ) -> bool:
+    ) -> bool | None:
         """
-        Validate that the API key used to init the class is valid, in this case there's no key so always True
+        Validate that the API key used to init the class is valid, in this case there's no key so always None
 
         Returns
         -------
-        Always True
+        Always None
         """
-        return True
+        return None
 
     @classmethod
     def _create_dividend_data_from_response_dividends_series(
