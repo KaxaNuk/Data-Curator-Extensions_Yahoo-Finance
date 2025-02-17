@@ -383,7 +383,7 @@ class YahooFinance(DataProviderInterface):
                     date_key = cls._field_correspondences_market_data_daily_rows['date']
                     entity_fields_row = date_indexed_row.to_dict()
                     entity_fields_row[date_key] = price_date_string
-                    attributes = entity_helper.fill_fields(
+                    attributes = entity_helper.convert_data_row_into_entity_fields(
                         entity_fields_row,
                         dict(cls._field_correspondences_market_data_daily_rows),
                         MarketDataDailyRow
