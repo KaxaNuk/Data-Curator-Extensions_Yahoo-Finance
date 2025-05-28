@@ -16,7 +16,7 @@ from kaxanuk.data_curator.entities import (
     MarketDataDailyRow,
     SplitData,
     SplitDataRow,
-    Ticker,
+    MainIdentifier,
 )
 from kaxanuk.data_curator.exceptions import (
     DividendDataEmptyError,
@@ -29,7 +29,7 @@ from kaxanuk.data_curator.exceptions import (
     MarketDataRowError,
     SplitDataEmptyError,
     SplitDataRowError,
-    TickerNotFoundError,
+    IdentifierNotFoundError,
 )
 from kaxanuk.data_curator.data_providers.data_provider_interface import DataProviderInterface
 from kaxanuk.data_curator.services import entity_helper
@@ -42,19 +42,26 @@ class YahooFinance(DataProviderInterface):
         'quarterly': 'quarterly',
     })
 
-    _field_correspondences_fundamental_income_statement = types.MappingProxyType({
-
-    })
-
     _field_correspondences_market_data_daily_rows = types.MappingProxyType({
         'date': 'Date',
-        'open': 'Open',
-        'high': 'High',
-        'low': 'Low',
-        'close': 'Close',
-        'adjusted_close': None,
-        'volume': 'Volume',
+        'open': None,
+        'high': None,
+        'low': None,
+        'close': None,
+        'volume': None,
         'vwap': None,
+        'split_adjusted_open': 'Open',
+        'split_adjusted_high': 'High',
+        'split_adjusted_low': 'Low',
+        'split_adjusted_close': 'Close',
+        'split_adjusted_volume': 'Volume',
+        'split_adjusted_vwap': None,
+        'dividend_and_split_adjusted_open': None,
+        'dividend_and_split_adjusted_high': None,
+        'dividend_and_split_adjusted_low': None,
+        'dividend_and_split_adjusted_close': 'Adj Close',
+        'dividend_and_split_adjusted_volume': None,
+        'dividend_and_split_adjusted_vwap': None,
     })
 
     def __init__(self):
@@ -64,7 +71,7 @@ class YahooFinance(DataProviderInterface):
     def get_dividend_data(
         self,
         *,
-        ticker: str,
+        main_identifier: str,
         start_date: datetime.date,
         end_date: datetime.date,
     ) -> DividendData:
@@ -73,7 +80,7 @@ class YahooFinance(DataProviderInterface):
 
         Parameters
         ----------
-        ticker
+        main_identifier
             the stock's ticker
         start_date
             the start date for the data
@@ -87,32 +94,32 @@ class YahooFinance(DataProviderInterface):
         try:
             if (
                 self.stock_general_data is None
-                or ticker not in self.stock_general_data.tickers
+                or main_identifier not in self.stock_general_data.tickers
                 or not hasattr(
-                    self.stock_general_data.tickers[ticker],
+                    self.stock_general_data.tickers[main_identifier],
                     'dividends'
                 )
             ):
                 raise DividendDataEmptyError
 
             dividend_data = self._create_dividend_data_from_response_dividends_series(
-                ticker,
-                self.stock_general_data.tickers[ticker].dividends,
+                main_identifier,
+                self.stock_general_data.tickers[main_identifier].dividends,
                 start_date=start_date,
                 end_date=end_date,
             )
         except DividendDataEmptyError:
-            msg = f"{ticker} has no dividend data obtained for the selected period, omitting its dividend data"
+            msg = f"{main_identifier} has no dividend data obtained for the selected period, omitting its dividend data"
             logging.getLogger(__name__).warning(msg)
             dividend_data = DividendData(
-                ticker=Ticker(ticker),
+                main_identifier=MainIdentifier(main_identifier),
                 rows={}
             )
         except DividendDataRowError as error:
-            msg = f"{ticker} dividend data error: {error}"
+            msg = f"{main_identifier} dividend data error: {error}"
             logging.getLogger(__name__).error(msg)
             dividend_data = DividendData(
-                ticker=Ticker(ticker),
+                main_identifier=MainIdentifier(main_identifier),
                 rows={}
             )
 
@@ -121,20 +128,20 @@ class YahooFinance(DataProviderInterface):
     def get_fundamental_data(
         self,
         *,
-        ticker: str,
+        main_identifier: str,
         period: str,
         start_date: datetime.date,
         end_date: datetime.date,
     ) -> FundamentalData:
         return FundamentalData(
-            ticker=Ticker(ticker),
+            main_identifier=MainIdentifier(main_identifier),
             rows={}
         )
 
     def get_market_data(
         self,
         *,
-        ticker: str,
+        main_identifier: str,
         start_date: datetime.date,
         end_date: datetime.date,
     ) -> MarketData:
@@ -143,7 +150,7 @@ class YahooFinance(DataProviderInterface):
 
         Parameters
         ----------
-        ticker
+        main_identifier
             the stock's ticker
         start_date
             the start date for the data
@@ -161,19 +168,19 @@ class YahooFinance(DataProviderInterface):
         """
         if (
             self.stock_market_data is None
-            or ticker not in self.stock_market_data
+            or main_identifier not in self.stock_market_data
         ):
-            raise TickerNotFoundError(f"No market data for ticker {ticker}")
+            raise IdentifierNotFoundError(f"No market data for ticker {main_identifier}")
 
         return self._create_market_data_from_response_dataframe(
-            ticker,
-            self.stock_market_data[ticker]
+            main_identifier,
+            self.stock_market_data[main_identifier]
         )
 
     def get_split_data(
         self,
         *,
-        ticker: str,
+        main_identifier: str,
         start_date: datetime.date,
         end_date: datetime.date,
     ) -> SplitData:
@@ -182,7 +189,7 @@ class YahooFinance(DataProviderInterface):
 
         Parameters
         ----------
-        ticker
+        main_identifier
             the stock's ticker
         start_date
             the start date for the data
@@ -196,38 +203,38 @@ class YahooFinance(DataProviderInterface):
         try:
             if (
                 self.stock_general_data is None
-                or ticker not in self.stock_general_data.tickers
+                or main_identifier not in self.stock_general_data.tickers
                 or not hasattr(
-                    self.stock_general_data.tickers[ticker],
+                    self.stock_general_data.tickers[main_identifier],
                     'splits'
                 )
             ):
                 raise SplitDataEmptyError
 
             split_data = self._create_split_data_from_response_splits_series(
-                ticker,
-                self.stock_general_data.tickers[ticker].splits,
+                main_identifier,
+                self.stock_general_data.tickers[main_identifier].splits,
                 start_date=start_date,
                 end_date=end_date,
             )
         except SplitDataEmptyError:
-            msg = f"{ticker} has no split data obtained for the selected period, omitting its split data"
+            msg = f"{main_identifier} has no split data obtained for the selected period, omitting its split data"
             logging.getLogger(__name__).warning(msg)
             split_data = SplitData(
-                ticker=Ticker(ticker),
+                main_identifier=MainIdentifier(main_identifier),
                 rows={}
             )
         except SplitDataRowError as error:
-            msg = f"{ticker} split data error: {error}"
+            msg = f"{main_identifier} split data error: {error}"
             logging.getLogger(__name__).error(msg)
             split_data = SplitData(
-                ticker=Ticker(ticker),
+                main_identifier=MainIdentifier(main_identifier),
                 rows={}
             )
 
         return split_data
 
-    def init_config(
+    def initialize(
         self,
         *,
         configuration: Configuration,
@@ -241,13 +248,15 @@ class YahooFinance(DataProviderInterface):
             The Configuration entity with the required data parameters
         """
         self.stock_general_data = yfinance.Tickers(
-            " ".join(configuration.tickers)
+            " ".join(configuration.identifiers)
         )
         self.stock_market_data = self.stock_general_data.history(
             start=configuration.start_date.isoformat(),
             end=configuration.end_date.isoformat(),
-            actions=True,
             group_by='ticker',
+            # actions=True,
+            auto_adjust=False,
+            back_adjust=False,
         )
 
     def validate_api_key(
@@ -316,8 +325,7 @@ class YahooFinance(DataProviderInterface):
                     dividend=decimal.Decimal(
                         str(dividend)
                     ),
-                    # @todo: the following field is not present in the data source, need to make the field optional:
-                    adjusted_dividend=decimal.Decimal(
+                    split_adjusted_dividend=decimal.Decimal(
                         str(dividend)
                     ),
                 )
@@ -330,7 +338,7 @@ class YahooFinance(DataProviderInterface):
             raise DividendDataRowError(msg) from error
 
         return DividendData(
-            ticker=Ticker(ticker),
+            main_identifier=MainIdentifier(ticker),
             rows=dividend_rows
         )
 
@@ -413,7 +421,7 @@ class YahooFinance(DataProviderInterface):
             market_data = MarketData(
                 start_date=min_date,
                 end_date=max_date,
-                ticker=Ticker(ticker),
+                main_identifier=MainIdentifier(ticker),
                 daily_rows=market_data_rows
             )
         except (
@@ -486,6 +494,6 @@ class YahooFinance(DataProviderInterface):
             raise SplitDataRowError(msg) from error
 
         return SplitData(
-            ticker=Ticker(ticker),
+            main_identifier=MainIdentifier(ticker),
             rows=split_rows
         )

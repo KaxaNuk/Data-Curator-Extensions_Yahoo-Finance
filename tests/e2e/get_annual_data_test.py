@@ -8,7 +8,7 @@ from kaxanuk.data_curator.entities import (
 )
 from kaxanuk.data_curator.exceptions import (
     EntityProcessingError,
-    TickerNotFoundError,
+    IdentifierNotFoundError,
 )
 from kaxanuk.data_curator_extensions.yahoo_finance import YahooFinance
 
@@ -46,12 +46,12 @@ START_DATE = datetime.date.fromisoformat('2020-01-01')
 @pytest.fixture(scope="module")
 def yahoo_finance_inexistent_tickers_instance():
     yahoo_finance = YahooFinance()
-    yahoo_finance.init_config(
+    yahoo_finance.initialize(
         configuration=Configuration(
             start_date=START_DATE,
             end_date=YESTERDAY,
             period=PERIOD_TO_TEST,
-            tickers=INEXISTENT_TICKERS_TO_TEST,
+            identifiers=INEXISTENT_TICKERS_TO_TEST,
             columns=COLUMNS_TO_TEST,
         )
     )
@@ -62,12 +62,12 @@ def yahoo_finance_inexistent_tickers_instance():
 @pytest.fixture(scope="module")
 def yahoo_finance_invalid_tickers_instance():
     yahoo_finance = YahooFinance()
-    yahoo_finance.init_config(
+    yahoo_finance.initialize(
         configuration=Configuration(
             start_date=START_DATE,
             end_date=YESTERDAY,
             period=PERIOD_TO_TEST,
-            tickers=INVALID_TICKERS_TO_TEST,
+            identifiers=INVALID_TICKERS_TO_TEST,
             columns=COLUMNS_TO_TEST,
         )
     )
@@ -78,12 +78,12 @@ def yahoo_finance_invalid_tickers_instance():
 @pytest.fixture(scope="module")
 def yahoo_finance_valid_tickers_instance():
     yahoo_finance = YahooFinance()
-    yahoo_finance.init_config(
+    yahoo_finance.initialize(
         configuration=Configuration(
             start_date=START_DATE,
             end_date=YESTERDAY,
             period=PERIOD_TO_TEST,
-            tickers=VALID_TICKERS_TO_TEST,
+            identifiers=VALID_TICKERS_TO_TEST,
             columns=COLUMNS_TO_TEST,
         )
     )
@@ -123,9 +123,9 @@ def test_get_inexistent_market_data(
     yahoo_finance_inexistent_tickers_instance,
     ticker
 ):
-    with pytest.raises(TickerNotFoundError):
+    with pytest.raises(IdentifierNotFoundError):
         yahoo_finance_inexistent_tickers_instance.get_market_data(
-            ticker=ticker,
+            main_identifier=ticker,
             start_date=START_DATE,
             end_date=YESTERDAY,
         )
@@ -141,7 +141,7 @@ def test_get_invalid_market_data(
 ):
     with pytest.raises(EntityProcessingError):
         yahoo_finance_invalid_tickers_instance.get_market_data(
-            ticker=ticker,
+            main_identifier=ticker,
             start_date=START_DATE,
             end_date=YESTERDAY,
         )
@@ -156,7 +156,7 @@ def test_get_valid_market_data(
     ticker
 ):
     market_data = yahoo_finance_valid_tickers_instance.get_market_data(
-        ticker=ticker,
+        main_identifier=ticker,
         start_date=START_DATE,
         end_date=YESTERDAY,
     )
@@ -173,7 +173,7 @@ def test_get_valid_dividend_data(
     ticker
 ):
     dividend_data = yahoo_finance_valid_tickers_instance.get_dividend_data(
-        ticker=ticker,
+        main_identifier=ticker,
         start_date=START_DATE,
         end_date=YESTERDAY,
     )
@@ -190,7 +190,7 @@ def test_get_valid_split_data(
     ticker
 ):
     split_data = yahoo_finance_valid_tickers_instance.get_split_data(
-        ticker=ticker,
+        main_identifier=ticker,
         start_date=START_DATE,
         end_date=YESTERDAY,
     )

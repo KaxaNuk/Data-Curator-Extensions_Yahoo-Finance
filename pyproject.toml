@@ -17,15 +17,15 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [    # dev dependencies are in the [tool.pdm.dev-dependencies] section
-#    "kaxanuk-data_curator>=0.28",  # @todo: add this once we have a release
+#    "kaxanuk-data_curator>=0.39",  # @todo: add this once we have a release
     "packaging>=24.2",
     "pandas>=2.2.3",
-    "yfinance>=0.2.50",
+    "yfinance>=0.2.61",
 ]
 dynamic = ["version"]
 license = {text = "MIT License"}
 readme = "README.md"
-requires-python = "==3.12.*"
+requires-python = ">=3.12,<3.14"
 
 [project.urls]
 "Homepage" = "https://kaxanuk.mx"
@@ -98,7 +98,7 @@ docs = [
 
 [tool.pdm.scripts]
 # Run these with pdm run <script_name>
-install_dev = "pdm install --dev --no-lock --no-self --project ."
+install_dev = "pdm install --dev --no-lock --project ."
 lint = "ruff check"
 test = "pytest --cov=src --cov=tests --cov-report=term-missing:skip-covered tests"
 
