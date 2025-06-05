@@ -4,11 +4,13 @@ build-backend = "pdm.backend"
 
 
 [project]
-name = "kaxanuk-data_curator_extensions-yahoo_finance"
+name = "kaxanuk.data_curator_extensions.yahoo_finance"
 description = "Yahoo Finance data provider for the KaxaNuk Data Curator component library"
 
 authors = [
+    {name = "KaxaNuk", email="info@kaxanuk.mx"},
     {name = "Rinku Kazeno", email="rinku.kazeno@kaxanuk.mx"},
+    {name = "Ruben Flores", email="ruben.flores@kaxanuk.mx"},
     {name = "Arturo Aguilar", email="arturo.aguilar@kaxanuk.mx"},
 ]
 classifiers = [
@@ -17,23 +19,23 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [    # dev dependencies are in the [tool.pdm.dev-dependencies] section
-#    "kaxanuk-data_curator>=0.28",  # @todo: add this once we have a release
+    "kaxanuk-data_curator>0.40.0",
     "packaging>=24.2",
     "pandas>=2.2.3",
-    "yfinance>=0.2.50",
+    "yfinance>=0.2.61",
 ]
 dynamic = ["version"]
 license = {text = "MIT License"}
 readme = "README.md"
-requires-python = "==3.12.*"
+requires-python = ">=3.12,<3.14"
 
 [project.urls]
-"Homepage" = "https://kaxanuk.mx"
+Homepage = "https://kaxanuk.mx"
+Repository = "https://github.com/KaxaNuk/Data-Curator-Extensions_Yahoo-Finance"
 # @todo: add the follwing:
 #Documentation = "https://readthedocs.org"
-#Repository = "https://github.com/me/spam.git"
-#Issues = "https://github.com/me/spam/issues"
-#Changelog = "https://github.com/me/spam/blob/master/CHANGELOG.md"
+Issues = "https://github.com/KaxaNuk/Data-Curator-Extensions_Yahoo-Finance/issues"
+Changelog = "https://github.com/KaxaNuk/Data-Curator-Extensions_Yahoo-Finance/blob/main/CHANGELOG.md"
 
 
 [tool.coverage.run]
@@ -98,7 +100,7 @@ docs = [
 
 [tool.pdm.scripts]
 # Run these with pdm run <script_name>
-install_dev = "pdm install --dev --no-lock --no-self --project ."
+install_dev = "pdm install --dev --no-lock --project ."
 lint = "ruff check"
 test = "pytest --cov=src --cov=tests --cov-report=term-missing:skip-covered tests"
 
