@@ -1,7 +1,6 @@
 # KaxaNuk Data Curator Extension: Yahoo Finance Data Provider
 
 ![Python](https://img.shields.io/badge/python-3.12%20|%203.13-blue?logo=python&logoColor=ffdd54)
-
 [![Build Status](https://github.com/KaxaNuk/Data-Curator-Extensions_Yahoo-Finance/actions/workflows/main.yml/badge.svg)](https://github.com/KaxaNuk/Data-Curator-Extensions_Yahoo-Finance/actions/workflows/main.yml)
 
 Yahoo Finance data provider extension for the [KaxaNuk Data Curator](https://github.com/KaxaNuk/Data-Curator) component library.
