@@ -50,18 +50,18 @@ class YahooFinance(DataProviderInterface):
         'close': None,
         'volume': None,
         'vwap': None,
-        'split_adjusted_open': 'Open',
-        'split_adjusted_high': 'High',
-        'split_adjusted_low': 'Low',
-        'split_adjusted_close': 'Close',
-        'split_adjusted_volume': 'Volume',
-        'split_adjusted_vwap': None,
-        'dividend_and_split_adjusted_open': None,
-        'dividend_and_split_adjusted_high': None,
-        'dividend_and_split_adjusted_low': None,
-        'dividend_and_split_adjusted_close': 'Adj Close',
-        'dividend_and_split_adjusted_volume': None,
-        'dividend_and_split_adjusted_vwap': None,
+        'open_split_adjusted': 'Open',
+        'high_split_adjusted': 'High',
+        'low_split_adjusted': 'Low',
+        'close_split_adjusted': 'Close',
+        'volume_split_adjusted': 'Volume',
+        'vwap_split_adjusted': None,
+        'open_dividend_and_split_adjusted': None,
+        'high_dividend_and_split_adjusted': None,
+        'low_dividend_and_split_adjusted': None,
+        'close_dividend_and_split_adjusted': 'Adj Close',
+        'volume_dividend_and_split_adjusted': None,
+        'vwap_dividend_and_split_adjusted': None,
     })
 
     def __init__(self):
@@ -325,7 +325,7 @@ class YahooFinance(DataProviderInterface):
                     dividend=decimal.Decimal(
                         str(dividend)
                     ),
-                    split_adjusted_dividend=decimal.Decimal(
+                    dividend_split_adjusted=decimal.Decimal(
                         str(dividend)
                     ),
                 )
