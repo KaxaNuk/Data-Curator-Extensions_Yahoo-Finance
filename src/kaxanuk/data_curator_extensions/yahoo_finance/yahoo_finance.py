@@ -257,6 +257,8 @@ class YahooFinance(DataProviderInterface):
             # actions=True,
             auto_adjust=False,
             back_adjust=False,
+            period=None,
+            interval="1d",
         )
 
     def validate_api_key(

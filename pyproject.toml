@@ -19,10 +19,10 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [    # dev dependencies are in the [tool.pdm.dev-dependencies] section
-    "kaxanuk-data_curator>0.40.0",
+    "kaxanuk-data_curator>=0.41.0",
     "packaging>=24.2",
     "pandas>=2.2.3",
-    "yfinance>=0.2.61",
+    "yfinance>=0.2.65",
 ]
 dynamic = ["version"]
 license = {text = "MIT License"}
