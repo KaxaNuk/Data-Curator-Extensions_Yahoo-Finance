@@ -1,12 +1,17 @@
 import datetime
-import decimal
+import enum
 import fractions
 import logging
+import typing
 import types
 
 import pandas
+import pyarrow
 import yfinance
 
+from kaxanuk.data_curator.data_blocks.dividends import DividendsDataBlock
+from kaxanuk.data_curator.data_blocks.market_daily import MarketDailyDataBlock
+from kaxanuk.data_curator.data_blocks.splits import SplitsDataBlock
 from kaxanuk.data_curator.entities import (
     Configuration,
     DividendData,
@@ -20,53 +25,69 @@ from kaxanuk.data_curator.entities import (
 )
 from kaxanuk.data_curator.exceptions import (
     DividendDataEmptyError,
-    DividendDataRowError,
-    EntityFieldTypeError,
     EntityProcessingError,
-    EntityTypeError,
-    EntityValueError,
-    MarketDataEmptyError,
-    MarketDataRowError,
-    SplitDataEmptyError,
-    SplitDataRowError,
     IdentifierNotFoundError,
+    SplitDataEmptyError,
 )
 from kaxanuk.data_curator.data_providers.data_provider_interface import DataProviderInterface
-from kaxanuk.data_curator.services import entity_helper
+from kaxanuk.data_curator.services.data_provider_toolkit import (
+    DataBlockEndpointTagMap,
+    DataProviderToolkit,
+    EndpointFieldMap,
+)
 
 
 class YahooFinance(DataProviderInterface):
+
+    class Endpoints(enum.StrEnum):
+        DIVIDEND_DATA = 'dividend_data'
+        MARKET_DATA = 'market_data'
+        SPLIT_DATA = 'split_data'
 
     _config_to_yf_periods = types.MappingProxyType({
         'annual': 'yearly',
         'quarterly': 'quarterly',
     })
 
-    _field_correspondences_market_data_daily_rows = types.MappingProxyType({
-        'date': 'Date',
-        'open': None,
-        'high': None,
-        'low': None,
-        'close': None,
-        'volume': None,
-        'vwap': None,
-        'open_split_adjusted': 'Open',
-        'high_split_adjusted': 'High',
-        'low_split_adjusted': 'Low',
-        'close_split_adjusted': 'Close',
-        'volume_split_adjusted': 'Volume',
-        'vwap_split_adjusted': None,
-        'open_dividend_and_split_adjusted': None,
-        'high_dividend_and_split_adjusted': None,
-        'low_dividend_and_split_adjusted': None,
-        'close_dividend_and_split_adjusted': 'Adj Close',
-        'volume_dividend_and_split_adjusted': None,
-        'vwap_dividend_and_split_adjusted': None,
-    })
+    _dividend_data_endpoint_map: typing.Final[EndpointFieldMap] = {
+        Endpoints.DIVIDEND_DATA: {
+            DividendDataRow.ex_dividend_date: 'Date',
+            DividendDataRow.dividend: 'Dividends',
+            DividendDataRow.dividend_split_adjusted: 'Dividends',
+        },
+    }
+
+    _market_data_endpoint_map: typing.Final[EndpointFieldMap] = {
+        Endpoints.MARKET_DATA: {
+            MarketDataDailyRow.date: 'Date',
+            MarketDataDailyRow.open_split_adjusted: 'Open',
+            MarketDataDailyRow.high_split_adjusted: 'High',
+            MarketDataDailyRow.low_split_adjusted: 'Low',
+            MarketDataDailyRow.close_split_adjusted: 'Close',
+            MarketDataDailyRow.volume_split_adjusted: 'Volume',
+            MarketDataDailyRow.close_dividend_and_split_adjusted: 'Adj Close',
+        },
+    }
+
+    _split_data_endpoint_map: typing.Final[EndpointFieldMap] = {
+        Endpoints.SPLIT_DATA: {
+            SplitDataRow.split_date: 'Date',
+            SplitDataRow.numerator: 'Numerator',
+            SplitDataRow.denominator: 'Denominator',
+        },
+    }
 
     def __init__(self):
         self.stock_general_data = None
         self.stock_market_data = None
+
+    @classmethod
+    def get_data_block_endpoint_tag_map(cls) -> DataBlockEndpointTagMap:
+        return {
+            DividendsDataBlock: cls._dividend_data_endpoint_map,
+            MarketDailyDataBlock: cls._market_data_endpoint_map,
+            SplitsDataBlock: cls._split_data_endpoint_map,
+        }
 
     def get_dividend_data(
         self,
@@ -91,6 +112,11 @@ class YahooFinance(DataProviderInterface):
         -------
         DividendData
         """
+        empty_result = DividendData(
+            main_identifier=MainIdentifier(main_identifier),
+            rows={}
+        )
+
         try:
             if (
                 self.stock_general_data is None
@@ -102,26 +128,56 @@ class YahooFinance(DataProviderInterface):
             ):
                 raise DividendDataEmptyError
 
-            dividend_data = self._create_dividend_data_from_response_dividends_series(
-                main_identifier,
-                self.stock_general_data.tickers[main_identifier].dividends,
-                start_date=start_date,
-                end_date=end_date,
+            dividends_series = self.stock_general_data.tickers[main_identifier].dividends
+
+            if dividends_series.empty:
+                raise DividendDataEmptyError
+
+            # yfinance assigns made-up timezones, so slice by ISO string
+            date_range = slice(
+                start_date.isoformat(),
+                end_date.isoformat()
+            )
+            dividends_in_range = dividends_series[date_range]
+
+            if dividends_in_range.empty:
+                raise DividendDataEmptyError
+
+            endpoint_table = self._convert_series_to_endpoint_table(
+                dividends_in_range,
+                value_column_name='Dividends',
+            )
+
+            endpoint_tables = {
+                self.Endpoints.DIVIDEND_DATA: endpoint_table,
+            }
+
+            processed_endpoint_tables = DataProviderToolkit.process_endpoint_tables(
+                data_block=DividendsDataBlock,
+                endpoint_field_map=self._dividend_data_endpoint_map,
+                endpoint_tables=endpoint_tables,
+            )
+            consolidated_dividend_data = DataProviderToolkit.consolidate_processed_endpoint_tables(
+                processed_endpoint_tables=processed_endpoint_tables,
+                table_merge_fields=[DividendsDataBlock.clock_sync_field],
+                predominant_order_descending=False,
+            )
+            dividend_data = DividendsDataBlock.assemble_entities_from_consolidated_table(
+                consolidated_table=consolidated_dividend_data,
+                common_field_data={
+                    DividendData: {
+                        DividendData.main_identifier: MainIdentifier(main_identifier),
+                    }
+                }
             )
         except DividendDataEmptyError:
             msg = f"{main_identifier} has no dividend data obtained for the selected period, omitting its dividend data"
             logging.getLogger(__name__).warning(msg)
-            dividend_data = DividendData(
-                main_identifier=MainIdentifier(main_identifier),
-                rows={}
-            )
-        except DividendDataRowError as error:
+            dividend_data = empty_result
+        except EntityProcessingError as error:
             msg = f"{main_identifier} dividend data error: {error}"
             logging.getLogger(__name__).error(msg)
-            dividend_data = DividendData(
-                main_identifier=MainIdentifier(main_identifier),
-                rows={}
-            )
+            dividend_data = empty_result
 
         return dividend_data
 
@@ -164,7 +220,7 @@ class YahooFinance(DataProviderInterface):
         Raises
         ------
         EntityProcessingError
-        TickerNotFoundError
+        IdentifierNotFoundError
         """
         if (
             self.stock_market_data is None
@@ -172,10 +228,80 @@ class YahooFinance(DataProviderInterface):
         ):
             raise IdentifierNotFoundError(f"No market data for ticker {main_identifier}")
 
-        return self._create_market_data_from_response_dataframe(
-            main_identifier,
-            self.stock_market_data[main_identifier]
+        response_dataframe = self.stock_market_data[main_identifier]
+
+        if (
+            response_dataframe is None
+            or response_dataframe.empty
+        ):
+            raise EntityProcessingError("No data returned by market data endpoint")
+
+        non_empty_dataframe = response_dataframe.dropna(how='all')
+        if non_empty_dataframe.empty:
+            raise EntityProcessingError("No non-empty data returned by market data endpoint")
+
+        endpoint_table = self._convert_ticker_dataframe_to_endpoint_table(
+            non_empty_dataframe,
+            columns_to_preserve=list(
+                self._market_data_endpoint_map[self.Endpoints.MARKET_DATA].values()
+            ),
         )
+
+        # detect rows with empty data
+        date_column_name = self._market_data_endpoint_map[self.Endpoints.MARKET_DATA][MarketDataDailyRow.date]
+        value_column_names = [
+            col
+            for col in endpoint_table.column_names
+            if col != date_column_name
+        ]
+        row_is_empty_or_zero_parts = [
+            pyarrow.compute.or_(
+                pyarrow.compute.is_null(endpoint_table[col]),
+                pyarrow.compute.equal(endpoint_table[col], 0),
+            ).combine_chunks().fill_null(fill_value=True)
+            for col in value_column_names
+        ]
+        row_is_empty_or_zero = row_is_empty_or_zero_parts[0]
+        for part in row_is_empty_or_zero_parts[1:]:
+            row_is_empty_or_zero = pyarrow.compute.and_(row_is_empty_or_zero, part)
+
+        if pyarrow.compute.any(row_is_empty_or_zero).as_py():
+            problematic_dates_table = endpoint_table.select([date_column_name]).filter(row_is_empty_or_zero)
+            dates_output = DataProviderToolkit.format_consolidated_discrepancy_table_for_output(
+                discrepancy_table=problematic_dates_table,
+                output_column_renames=['date'],
+            )
+            msg = "\n".join([
+                "Market data contains rows with all-empty or zero values. Affected dates:",
+                dates_output,
+            ])
+
+            raise EntityProcessingError(msg)
+
+        endpoint_tables = {
+            self.Endpoints.MARKET_DATA: endpoint_table,
+        }
+
+        processed_endpoint_tables = DataProviderToolkit.process_endpoint_tables(
+            data_block=MarketDailyDataBlock,
+            endpoint_field_map=self._market_data_endpoint_map,
+            endpoint_tables=endpoint_tables,
+        )
+        consolidated_market_data = DataProviderToolkit.consolidate_processed_endpoint_tables(
+            processed_endpoint_tables=processed_endpoint_tables,
+            table_merge_fields=[MarketDailyDataBlock.clock_sync_field],
+            predominant_order_descending=False,
+        )
+        market_data = MarketDailyDataBlock.assemble_entities_from_consolidated_table(
+            consolidated_table=consolidated_market_data,
+            common_field_data={
+                MarketData: {
+                    MarketData.main_identifier: MainIdentifier(main_identifier),
+                }
+            }
+        )
+
+        return market_data  # noqa: RET504
 
     def get_split_data(
         self,
@@ -200,6 +326,11 @@ class YahooFinance(DataProviderInterface):
         -------
         SplitData
         """
+        empty_result = SplitData(
+            main_identifier=MainIdentifier(main_identifier),
+            rows={}
+        )
+
         try:
             if (
                 self.stock_general_data is None
@@ -211,26 +342,53 @@ class YahooFinance(DataProviderInterface):
             ):
                 raise SplitDataEmptyError
 
-            split_data = self._create_split_data_from_response_splits_series(
-                main_identifier,
-                self.stock_general_data.tickers[main_identifier].splits,
-                start_date=start_date,
-                end_date=end_date,
+            splits_series = self.stock_general_data.tickers[main_identifier].splits
+
+            if splits_series.empty:
+                raise SplitDataEmptyError
+
+            # yfinance assigns made-up timezones, so slice by ISO string
+            date_range = slice(
+                start_date.isoformat(),
+                end_date.isoformat()
+            )
+            splits_in_range = splits_series[date_range]
+
+            if splits_in_range.empty:
+                raise SplitDataEmptyError
+
+            endpoint_table = self._convert_splits_series_to_endpoint_table(splits_in_range)
+
+            endpoint_tables = {
+                self.Endpoints.SPLIT_DATA: endpoint_table,
+            }
+
+            processed_endpoint_tables = DataProviderToolkit.process_endpoint_tables(
+                data_block=SplitsDataBlock,
+                endpoint_field_map=self._split_data_endpoint_map,
+                endpoint_tables=endpoint_tables,
+            )
+            consolidated_split_data = DataProviderToolkit.consolidate_processed_endpoint_tables(
+                processed_endpoint_tables=processed_endpoint_tables,
+                table_merge_fields=[SplitsDataBlock.clock_sync_field],
+                predominant_order_descending=False,
+            )
+            split_data = SplitsDataBlock.assemble_entities_from_consolidated_table(
+                consolidated_table=consolidated_split_data,
+                common_field_data={
+                    SplitData: {
+                        SplitData.main_identifier: MainIdentifier(main_identifier),
+                    }
+                }
             )
         except SplitDataEmptyError:
             msg = f"{main_identifier} has no split data obtained for the selected period, omitting its split data"
             logging.getLogger(__name__).warning(msg)
-            split_data = SplitData(
-                main_identifier=MainIdentifier(main_identifier),
-                rows={}
-            )
-        except SplitDataRowError as error:
+            split_data = empty_result
+        except EntityProcessingError as error:
             msg = f"{main_identifier} split data error: {error}"
             logging.getLogger(__name__).error(msg)
-            split_data = SplitData(
-                main_identifier=MainIdentifier(main_identifier),
-                rows={}
-            )
+            split_data = empty_result
 
         return split_data
 
@@ -273,229 +431,101 @@ class YahooFinance(DataProviderInterface):
         """
         return None
 
-    @classmethod
-    def _create_dividend_data_from_response_dividends_series(
-        cls,
-        ticker: str,
-        dividends_series: pandas.DataFrame,
-        start_date: datetime.date,
-        end_date: datetime.date,
-    ) -> DividendData:
+    @staticmethod
+    def _convert_ticker_dataframe_to_endpoint_table(
+        dataframe: pandas.DataFrame,
+        columns_to_preserve: list[str],
+    ) -> pyarrow.Table:
         """
-        Populate a DividendData entity from the web service raw data.
+        Convert a yfinance ticker DataFrame into a PyArrow table suitable for the toolkit.
+
+        The DataFrame's DatetimeIndex is extracted as an ISO date string column named 'Date',
+        and only the specified columns are carried over so they align with the tags declared
+        in ``_market_data_endpoint_map``.
 
         Parameters
         ----------
-        ticker
-            The ticker symbol
-        dividends_series
-            The ticker's dividends as a Pandas Series
-        start_date
-            The start date for the data we're interested in
-        end_date
-            The end date for the data we're interested in
+        dataframe
+            Non-empty ticker DataFrame from ``stock_market_data[ticker]``,
+            with a DatetimeIndex and yfinance column names (Open, High, …).
+        columns_to_preserve
+            List of column names from the DataFrame to include in the output table.
 
         Returns
         -------
-        DividendData
-
-        Raises
-        ------
-        DividendDataEmptyError
-        DividendDataRowError
+        pyarrow.Table
         """
-        if dividends_series.empty:
-            raise DividendDataEmptyError
-
-        iteration_date = None
-        try:
-            # yfinance is assigning made-up date timezones, so we can't compare the date objects directly
-            date_range = slice(
-                start_date.isoformat(),
-                end_date.isoformat()
-            )
-            dividends = dividends_series[date_range]
-            dividend_rows = {}
-            for (timezone_date, dividend) in dividends.items():
-                date = timezone_date.date()
-                iteration_date = date.isoformat()
-                dividend_rows[iteration_date] = DividendDataRow(
-                    declaration_date=None,
-                    ex_dividend_date=date,
-                    record_date=None,
-                    payment_date=None,
-                    dividend=decimal.Decimal(
-                        str(dividend)
-                    ),
-                    dividend_split_adjusted=decimal.Decimal(
-                        str(dividend)
-                    ),
-                )
-        except (
-            EntityFieldTypeError,
-            EntityTypeError,
-            EntityValueError,
-        ) as error:
-            msg = f"date: {iteration_date}"
-            raise DividendDataRowError(msg) from error
-
-        return DividendData(
-            main_identifier=MainIdentifier(ticker),
-            rows=dividend_rows
+        dataframe_with_date_column = dataframe.assign(
+            Date=pandas.to_datetime(dataframe.index).date
         )
 
-    @classmethod
-    def _create_market_data_from_response_dataframe(
-        cls,
-        ticker: str,
-        response_dataframe: pandas.DataFrame
-    ) -> MarketData:
+        return (
+            dataframe_with_date_column[columns_to_preserve]
+            .pipe(
+                pyarrow.Table.from_pandas,
+                preserve_index=False
+            )
+        )
+
+    @staticmethod
+    def _convert_series_to_endpoint_table(
+        series: pandas.Series,
+        value_column_name: str,
+    ) -> pyarrow.Table:
         """
-        Populate a MarketData entity from the web service raw data.
+        Convert a yfinance Series with a DatetimeIndex into a PyArrow table.
+
+        Extracts the index as an ISO date column named 'Date' and the values
+        as a column with the given name.
 
         Parameters
         ----------
-        ticker
-            The ticker symbol
-        response_dataframe
-            The ticker's dataframe
+        series
+            Pandas Series with a DatetimeIndex (e.g. dividends or splits from yfinance).
+        value_column_name
+            Name for the value column in the resulting table.
 
         Returns
         -------
-        MarketData
-
-        Raises
-        ------
-        EntityProcessingError
+        pyarrow.Table
         """
-        market_data_rows = {}
-        try:
-            if (
-                response_dataframe is None
-                or response_dataframe.empty
-            ):
-                raise MarketDataEmptyError("No data returned by market data endpoint")
+        dataframe = series.to_frame(name=value_column_name)
+        dataframe_with_date = dataframe.assign(Date=pandas.to_datetime(dataframe.index).date)
 
-            non_empty_rows_dataframe = response_dataframe.dropna(how='all')
-            if non_empty_rows_dataframe.empty:
-                raise MarketDataEmptyError("No non-empty data returned by market data endpoint")
-
-            timestamps = non_empty_rows_dataframe.index.to_series()
-
-            min_date = None
-            max_date = None
-
-            for timestamp in timestamps:
-                price_date = timestamp.date()
-                price_date_string = price_date.isoformat()
-                try:
-                    date_indexed_row = non_empty_rows_dataframe.loc[timestamp]
-                    date_key = cls._field_correspondences_market_data_daily_rows['date']
-                    entity_fields_row = date_indexed_row.to_dict()
-                    entity_fields_row[date_key] = price_date_string
-                    attributes = entity_helper.convert_data_row_into_entity_fields(
-                        entity_fields_row,
-                        dict(cls._field_correspondences_market_data_daily_rows),
-                        MarketDataDailyRow
-                    )
-                    market_data_rows[price_date_string] = MarketDataDailyRow(
-                        **attributes
-                    )
-                except (
-                    EntityFieldTypeError,
-                    EntityTypeError,
-                    EntityValueError,
-                ) as error:
-                    msg = f"date: {price_date_string}"
-                    raise MarketDataRowError(msg) from error
-
-                if (
-                    min_date is None
-                    or price_date < min_date
-                ):
-                    min_date = price_date
-                if (
-                    max_date is None
-                    or price_date > max_date
-                ):
-                    max_date = price_date
-
-            market_data = MarketData(
-                start_date=min_date,
-                end_date=max_date,
-                main_identifier=MainIdentifier(ticker),
-                daily_rows=market_data_rows
+        return (
+            dataframe_with_date[['Date', value_column_name]]
+            .pipe(
+                pyarrow.Table.from_pandas,
+                preserve_index=False
             )
-        except (
-            MarketDataEmptyError,
-            MarketDataRowError
-        ) as error:
-            raise EntityProcessingError("Market data processing error") from error
+        )
 
-        return market_data
-
-    @classmethod
-    def _create_split_data_from_response_splits_series(
-        cls,
-        ticker: str,
+    @staticmethod
+    def _convert_splits_series_to_endpoint_table(
         splits_series: pandas.Series,
-        start_date: datetime.date,
-        end_date: datetime.date,
-    ) -> SplitData:
+    ) -> pyarrow.Table:
         """
-        Populate a SplitData entity from the web service raw data.
+        Convert a yfinance splits Series into a PyArrow table with Numerator/Denominator columns.
+
+        Each split ratio is decomposed into its numerator and denominator via
+        ``fractions.Fraction``, then stored alongside the ISO date.
 
         Parameters
         ----------
-        ticker
-            The ticker symbol
         splits_series
-            The ticker's splits as a Pandas Series
-        start_date
-            The start date for the data we're interested in
-        end_date
-            The end date for the data we're interested in
+            Pandas Series of split ratios with a DatetimeIndex.
 
         Returns
         -------
-        SplitData
-
-        Raises
-        ------
-        SplitDataEmptyError
-        SplitDataRowError
+        pyarrow.Table
         """
-        if splits_series.empty:
-            raise SplitDataEmptyError
+        rows = []
+        for (timezone_date, ratio) in splits_series.items():
+            fraction = fractions.Fraction(ratio).limit_denominator()
+            rows.append({
+                'Date': timezone_date.date(),
+                'Numerator': float(fraction.numerator),
+                'Denominator': float(fraction.denominator),
+            })
 
-        iteration_date = None
-        try:
-            # yfinance is assigning made-up date timezones, so we can't compare the date objects directly
-            date_range = slice(
-                start_date.isoformat(),
-                end_date.isoformat()
-            )
-            splits = splits_series[date_range]
-            split_rows = {}
-            for (timezone_date, split) in splits.items():
-                date = timezone_date.date()
-                iteration_date = date.isoformat()
-                split_fraction = fractions.Fraction(split).limit_denominator()
-
-                split_rows[iteration_date] = SplitDataRow(
-                    split_date=date,
-                    numerator=float(split_fraction.numerator),
-                    denominator=float(split_fraction.denominator),
-                )
-        except (
-            EntityFieldTypeError,
-            EntityTypeError,
-            EntityValueError,
-        ) as error:
-            msg = f"date: {iteration_date}"
-            raise SplitDataRowError(msg) from error
-
-        return SplitData(
-            main_identifier=MainIdentifier(ticker),
-            rows=split_rows
-        )
+        return pyarrow.Table.from_pylist(rows)
