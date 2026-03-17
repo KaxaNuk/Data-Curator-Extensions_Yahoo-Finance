@@ -176,6 +176,5 @@ cython_debug/
 
 # Customizations
 __main__.py
-Dockerfile
 Config/*
 Output/*
