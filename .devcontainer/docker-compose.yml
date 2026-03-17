@@ -1,0 +1,10 @@
+services:
+  workspace-kndc-yf:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+      args:
+        - BUILD_ENV
+
+    environment:
+      - KNDC_DEBUG_PORT
